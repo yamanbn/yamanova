@@ -4,20 +4,30 @@ import { createClient } from '@/lib/supabase/server'
 import { cookies } from 'next/headers'
 import OpenAI from 'openai'
 
-// تهيئة OpenAI باستخدام المفتاح من .env
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
-
 // ============================================================
 // POST: إرسال رسالة إلى المساعد
 // ============================================================
 export async function POST(request: NextRequest) {
   try {
+    // ✅ تهيئة OpenAI داخل الدالة (Lazy Initialization)
+    // هذا يمنع فشل البناء إذا كان المفتاح غير موجود مؤقتاً
+    if (!process.env.OPENAI_API_KEY) {
+      return NextResponse.json(
+        { error: 'OPENAI_API_KEY غير مُهيأ في متغيرات البيئة' },
+        { status: 500 }
+      )
+    }
+
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    })
+
+    // ============================================================
+    // 1. التحقق من المصادقة
+    // ============================================================
     const cookieStore = cookies()
     const supabase = createClient(cookieStore)
 
-    // التحقق من المصادقة
     const { data: { user }, error: authError } = await supabase.auth.getUser()
     if (authError || !user) {
       return NextResponse.json({ error: 'غير مصرح به' }, { status: 401 })
@@ -34,7 +44,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'لم يتم العثور على المنظمة' }, { status: 404 })
     }
 
-    // قراءة الرسائل من الطلب
+    // ============================================================
+    // 2. قراءة الرسائل من الطلب
+    // ============================================================
     const body = await request.json()
     const { messages, conversation_id, type = 'general' } = body
 
@@ -43,7 +55,7 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
-    // 1. إرسال الطلب إلى OpenAI
+    // 3. إرسال الطلب إلى OpenAI
     // ============================================================
     const systemPrompt = `
 أنت مساعد ذكي متخصص في السلامة والعمليات (HSE) في منصة YAMANOVA.
@@ -55,7 +67,7 @@ export async function POST(request: NextRequest) {
 `
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini', // يمكنك تغيير إلى 'gpt-4' إذا كان لديك حق الوصول
+      model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: systemPrompt },
         ...messages
@@ -67,7 +79,7 @@ export async function POST(request: NextRequest) {
     const reply = completion.choices[0]?.message?.content || 'عذراً، لم أستطع توليد رد.'
 
     // ============================================================
-    // 2. حفظ المحادثة في قاعدة البيانات (اختياري)
+    // 4. حفظ المحادثة في قاعدة البيانات (اختياري)
     // ============================================================
     let conversationId = conversation_id
 
@@ -96,16 +108,23 @@ export async function POST(request: NextRequest) {
         .single()
 
       if (existing) {
-        const updatedMessages = [...existing.messages, ...messages, { role: 'assistant', content: reply }]
+        const updatedMessages = [
+          ...existing.messages,
+          ...messages,
+          { role: 'assistant', content: reply }
+        ]
         await supabase
           .from('ai_conversations')
-          .update({ messages: updatedMessages, updated_at: new Date().toISOString() })
+          .update({
+            messages: updatedMessages,
+            updated_at: new Date().toISOString()
+          })
           .eq('id', conversationId)
       }
     }
 
     // ============================================================
-    // 3. إرجاع الرد للمستخدم
+    // 5. إرجاع الرد للمستخدم
     // ============================================================
     return NextResponse.json({
       reply,

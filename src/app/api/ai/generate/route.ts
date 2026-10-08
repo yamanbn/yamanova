@@ -1,12 +1,37 @@
+// src/app/api/ai/generate/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-
+// ============================================================
+// POST: توليد مستندات السلامة بالذكاء الاصطناعي
+// ============================================================
 export async function POST(req: NextRequest) {
   try {
+    // ✅ تهيئة OpenAI داخل الدالة (Lazy Initialization)
+    if (!process.env.OPENAI_API_KEY) {
+      return NextResponse.json(
+        { error: 'OPENAI_API_KEY غير مُهيأ في متغيرات البيئة' },
+        { status: 500 }
+      )
+    }
+
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    })
+
     const { prompt, type } = await req.json()
 
+    // التحقق من المدخلات
+    if (!prompt || !type) {
+      return NextResponse.json(
+        { error: 'prompt و type مطلوبان' },
+        { status: 400 }
+      )
+    }
+
+    // ============================================================
+    // إعداد الـ Prompts
+    // ============================================================
     let systemPrompt = `You are YAMANOVA, an expert HSE (Health, Safety, Environment) AI assistant for the UAE construction and industrial sector. 
 Generate professional safety documents in JSON format.`
 
@@ -18,6 +43,9 @@ Return valid JSON only with fields appropriate for a safety document.`
 Return JSON with: { title, hazards: [{description, likelihood(1-5), severity(1-5), control_measures}], residual_risk }`
     }
 
+    // ============================================================
+    // استدعاء OpenAI
+    // ============================================================
     const response = await openai.chat.completions.create({
       model: 'gpt-4-turbo-preview',
       messages: [
@@ -29,8 +57,32 @@ Return JSON with: { title, hazards: [{description, likelihood(1-5), severity(1-5
     })
 
     const content = response.choices[0].message.content
-    return NextResponse.json(JSON.parse(content || '{}'))
-  } catch (error) {
-    return NextResponse.json({ error: 'AI generation failed' }, { status: 500 })
+
+    // محاولة تحليل JSON مع معالجة الأخطاء
+    let parsedContent
+    try {
+      parsedContent = JSON.parse(content || '{}')
+    } catch (parseError) {
+      console.error('❌ JSON Parse Error:', parseError)
+      return NextResponse.json(
+        {
+          error: 'فشل في تحليل استجابة الذكاء الاصطناعي',
+          raw: content
+        },
+        { status: 500 }
+      )
+    }
+
+    return NextResponse.json(parsedContent)
+
+  } catch (error: any) {
+    console.error('❌ AI Generation Error:', error)
+    return NextResponse.json(
+      {
+        error: 'AI generation failed',
+        details: error.message
+      },
+      { status: 500 }
+    )
   }
 }
