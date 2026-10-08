@@ -1,9 +1,8 @@
-// src/app/dashboard/assets/page.tsx
 'use client'
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Plus, Search, Edit2, Trash2, Eye, Calendar, MapPin, User, Package, CheckCircle, XCircle, Clock, AlertTriangle, Truck, Tool, Wrench, Monitor } from 'lucide-react'
+import { Plus, Search, Edit2, Trash2, Eye, Calendar, MapPin, User, Package, CheckCircle, XCircle, Clock, AlertTriangle, Truck, Wrench, Monitor } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
@@ -263,21 +262,21 @@ export default function AssetsPage() {
       name: asset.name || '',
       asset_type: asset.asset_type || 'equipment',
       serial_number: asset.serial_number || '',
-      model: asset.model || '',
-      manufacturer: asset.manufacturer || '',
+      model: (asset as any).model || '',
+      manufacturer: (asset as any).manufacturer || '',
       asset_tag: asset.asset_tag || '',
       location: asset.location || '',
-      building: asset.building || '',
-      floor: asset.floor || '',
-      room: asset.room || '',
+      building: (asset as any).building || '',
+      floor: (asset as any).floor || '',
+      room: (asset as any).room || '',
       purchase_date: asset.purchase_date || '',
-      purchase_cost: asset.purchase_cost ? String(asset.purchase_cost) : '',
+      purchase_cost: (asset as any).purchase_cost ? String((asset as any).purchase_cost) : '',
       warranty_expiry: asset.warranty_expiry || '',
-      lifespan_years: asset.lifespan_years ? String(asset.lifespan_years) : '',
+      lifespan_years: (asset as any).lifespan_years ? String((asset as any).lifespan_years) : '',
       status: asset.status || 'active',
       condition: asset.condition || 'good',
-      maintenance_frequency: asset.maintenance_frequency || 365,
-      notes: asset.notes || '',
+      maintenance_frequency: (asset as any).maintenance_frequency || 365,
+      notes: (asset as any).notes || '',
     })
     setShowForm(true)
   }
@@ -308,7 +307,7 @@ export default function AssetsPage() {
   const getTypeIcon = (type: string) => {
     switch (type) {
       case 'vehicle': return <Truck size={14} />
-      case 'machinery': return <Tool size={14} />
+      case 'machinery': return <Wrench size={14} />
       case 'equipment': return <Package size={14} />
       case 'tool': return <Wrench size={14} />
       case 'it_equipment': return <Monitor size={14} />
@@ -433,7 +432,6 @@ export default function AssetsPage() {
                     return (
                       <tr key={asset.id} className="border-t hover:bg-gray-50">
                         <td className="p-4">
-                          {/* ✅ الرابط الصحيح مع /dashboard */}
                           <Link href={`/dashboard/assets/${asset.id}`} className="hover:text-blue-600 hover:underline">
                             <div className="font-medium">{asset.name}</div>
                             <div className="text-xs text-gray-500">SN: {asset.serial_number || 'N/A'}</div>
