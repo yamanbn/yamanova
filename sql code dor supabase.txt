@@ -1,0 +1,244 @@
+-- Enable UUID and pgcrypto
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- 1. Organizations Table
+CREATE TABLE organizations (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name TEXT NOT NULL,
+  trade_license TEXT,
+  country TEXT,
+  city TEXT,
+  subscription_tier TEXT DEFAULT 'trial',
+  settings JSONB DEFAULT '{}'::jsonb,
+  status TEXT DEFAULT 'active',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 2. Profiles (Links to auth.users)
+CREATE TABLE profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
+  full_name TEXT,
+  arabic_name TEXT,
+  avatar_url TEXT,
+  phone TEXT,
+  role TEXT DEFAULT 'worker',
+  preferred_language TEXT DEFAULT 'en',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 3. Employees
+CREATE TABLE employees (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  employee_code TEXT UNIQUE,
+  first_name TEXT NOT NULL,
+  last_name TEXT NOT NULL,
+  arabic_name TEXT,
+  job_title TEXT,
+  department TEXT,
+  passport_no TEXT,
+  visa_no TEXT,
+  emirates_id TEXT,
+  nationality TEXT,
+  date_of_birth DATE,
+  gender TEXT,
+  join_date DATE,
+  emergency_contact JSONB,
+  status TEXT DEFAULT 'active',
+  qr_code_hash TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 4. Projects
+CREATE TABLE projects (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  code TEXT,
+  client_name TEXT,
+  start_date DATE,
+  end_date DATE,
+  status TEXT DEFAULT 'planning',
+  lat FLOAT,
+  lng FLOAT,
+  address TEXT,
+  geofence_radius FLOAT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 5. Incidents
+CREATE TABLE incidents (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+  reported_by UUID REFERENCES profiles(id),
+  incident_type TEXT CHECK (incident_type IN ('accident', 'near_miss', 'unsafe_act', 'property_damage')),
+  severity TEXT CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+  location TEXT,
+  datetime TIMESTAMPTZ,
+  description TEXT,
+  root_cause TEXT,
+  corrective_actions TEXT,
+  preventive_actions TEXT,
+  status TEXT DEFAULT 'pending',
+  closed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 6. Inspections
+CREATE TABLE inspections (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+  inspector_id UUID REFERENCES profiles(id),
+  inspection_type TEXT CHECK (inspection_type IN ('site', 'fire_safety', 'ppe', 'vehicle', 'custom')),
+  checklist JSONB DEFAULT '[]'::jsonb,
+  results JSONB DEFAULT '[]'::jsonb,
+  photos TEXT[],
+  gps_coords JSONB,
+  signature_url TEXT,
+  status TEXT DEFAULT 'scheduled',
+  scheduled_date DATE,
+  completed_date TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 7. Risk Assessments (MVP)
+CREATE TABLE risk_assessments (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+  assessor_id UUID REFERENCES profiles(id),
+  title TEXT NOT NULL,
+  hazard_description TEXT,
+  likelihood_score INT CHECK (likelihood_score BETWEEN 1 AND 5),
+  severity_score INT CHECK (severity_score BETWEEN 1 AND 5),
+  risk_level TEXT GENERATED ALWAYS AS (
+    CASE 
+      WHEN (likelihood_score * severity_score) >= 20 THEN 'extreme'
+      WHEN (likelihood_score * severity_score) >= 12 THEN 'high'
+      WHEN (likelihood_score * severity_score) >= 6 THEN 'medium'
+      ELSE 'low'
+    END
+  ) STORED,
+  control_measures TEXT,
+  residual_risk_score INT,
+  status TEXT DEFAULT 'draft',
+  approved_by UUID REFERENCES profiles(id),
+  approved_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 8. Toolbox Talks (MVP)
+CREATE TABLE toolbox_talks (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+  supervisor_id UUID REFERENCES profiles(id),
+  topic TEXT NOT NULL,
+  date DATE NOT NULL,
+  attendees JSONB DEFAULT '[]'::jsonb, -- [{name, employee_id, signature}]
+  qr_code_hash TEXT,
+  digital_signature_url TEXT,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 9. Audit Logs (System)
+CREATE TABLE audit_logs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
+  user_id UUID REFERENCES profiles(id),
+  action TEXT,
+  table_name TEXT,
+  record_id UUID,
+  old_data JSONB,
+  new_data JSONB,
+  ip_address TEXT,
+  user_agent TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-----------------------------
+-- ROW LEVEL SECURITY (RLS) --
+-----------------------------
+ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE employees ENABLE ROW LEVEL SECURITY;
+ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE incidents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE inspections ENABLE ROW LEVEL SECURITY;
+ALTER TABLE risk_assessments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE toolbox_talks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+
+-- Policies: Tenant Isolation
+CREATE POLICY tenant_isolation_org ON organizations USING (id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY tenant_isolation_profiles ON profiles USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY tenant_isolation_employees ON employees USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY tenant_isolation_projects ON projects USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY tenant_isolation_incidents ON incidents USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY tenant_isolation_inspections ON inspections USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY tenant_isolation_risk ON risk_assessments USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY tenant_isolation_tbt ON toolbox_talks USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
+
+-- Allow users to read their own profile
+CREATE POLICY user_self_profile ON profiles USING (id = auth.uid());
+
+-----------------------------
+-- FUNCTIONS & TRIGGERS
+-----------------------------
+-- Auto-update updated_at
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+CREATE TRIGGER update_org_updated_at BEFORE UPDATE ON organizations FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_profiles_updated_at BEFORE UPDATE ON profiles FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- Apply to all tables...
+
+-- Handle New User Signup (Create Profile)
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+DECLARE
+  default_org_id UUID;
+BEGIN
+  -- If no org_id is provided, create a default organization for the user
+  IF NEW.raw_user_meta_data->>'organization_id' IS NULL THEN
+    INSERT INTO organizations (name, status)
+    VALUES (COALESCE(NEW.raw_user_meta_data->>'company_name', 'My Company'), 'active')
+    RETURNING id INTO default_org_id;
+  ELSE
+    default_org_id := (NEW.raw_user_meta_data->>'organization_id')::UUID;
+  END IF;
+
+  INSERT INTO public.profiles (id, organization_id, full_name, role)
+  VALUES (
+    NEW.id,
+    default_org_id,
+    COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.email),
+    COALESCE(NEW.raw_user_meta_data->>'role', 'company_admin')
+  );
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger the function on signup
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
